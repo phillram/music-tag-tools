@@ -43,6 +43,32 @@ These two options are mutually exclusive — you must provide exactly one.
 
 ## Options
 
+### `--list` / `-l`
+
+Display a table of all files in the target and their current tag values. No files are modified. Use this to inspect your files before running any update commands.
+
+```bash
+# List all files and tags in a folder
+python music_tagger.py --folder /music/album --list
+
+# List tags for a single file
+python music_tagger.py --file /music/song.mp3 --list
+```
+
+Example output:
+
+```
+Filename                          Title           Artist         Album          Year  #   Genre
+---------------------------------  --------------  -------------  ------------   ----  --  -----
+01 - Come Together.mp3            Come Together   The Beatles    Abbey Road     1969  1   Rock
+02 - Something.mp3                Something       The Beatles    Abbey Road     1969  2   Rock
+03 - Maxwell's Silver Hammer.mp3                  The Beatles    Abbey Road     1969  3
+```
+
+Fields with no value are shown as blank. `--list` exits immediately after printing and cannot be combined with any other option.
+
+---
+
 ### `--rename` / `-r`
 
 Rename each file so its filename matches its (possibly transformed) title tag. The original file extension is always preserved.

@@ -289,6 +289,51 @@ def rename_file(file_path: Path, new_stem: str, dry_run: bool) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Listing / inspection
+# ---------------------------------------------------------------------------
+
+COLUMNS = ("filename", "title", "artist", "album", "year", "track", "genre")
+COL_HEADERS = {
+    "filename": "Filename", "title": "Title", "artist": "Artist",
+    "album": "Album", "year": "Year", "track": "#", "genre": "Genre",
+}
+
+
+def list_files(files: list[Path]) -> None:
+    """Print a formatted table of filename + all tags to stdout."""
+    rows = []
+    for f in files:
+        tags = read_tags(f)
+        rows.append({
+            "filename": f.name,
+            "title":    tags["title"],
+            "artist":   tags["artist"],
+            "album":    tags["album"],
+            "year":     tags["year"],
+            "track":    tags["track"],
+            "genre":    tags["genre"],
+        })
+
+    # Calculate column widths: max of header and all cell values
+    widths = {col: len(COL_HEADERS[col]) for col in COLUMNS}
+    for row in rows:
+        for col in COLUMNS:
+            widths[col] = max(widths[col], len(row[col]))
+
+    def fmt_row(row: dict) -> str:
+        return "  ".join(row[col].ljust(widths[col]) for col in COLUMNS).rstrip()
+
+    separator = "  ".join("-" * widths[col] for col in COLUMNS)
+    header = fmt_row(COL_HEADERS)
+
+    print(header)
+    print(separator)
+    for row in rows:
+        print(fmt_row(row))
+    print(f"\n{len(rows)} file(s) found.")
+
+
+# ---------------------------------------------------------------------------
 # Per-file processing
 # ---------------------------------------------------------------------------
 
@@ -415,6 +460,9 @@ Examples:
   # Parse artist and title from filename, then rename using a different pattern
   python music_tagger.py --folder /music/album --tags-from-filename "{artist} - {title}" --rename-pattern "{artist} - {title}"
 
+  # List all files and their current tags (no modifications)
+  python music_tagger.py --folder /music/album --list
+
   # Dry run: preview every change without touching files
   python music_tagger.py --folder /music/album --strip-start 3 --rename --dry-run
         """,
@@ -479,6 +527,10 @@ Examples:
               "Example: --replace-special \" \" \"_\" \"-\""),
     )
 
+    parser.add_argument("--list", "-l", action="store_true",
+                        help=("Display a table of all files and their current tags. "
+                              "No files are modified. Cannot be combined with other options."))
+
     parser.add_argument("--dry-run", "-n", action="store_true",
                         help="Show what would change without modifying any files.")
 
@@ -494,6 +546,10 @@ def main() -> None:
 
     if not files:
         print("No supported audio files found.")
+        sys.exit(0)
+
+    if args.list:
+        list_files(files)
         sys.exit(0)
 
     if args.dry_run:
