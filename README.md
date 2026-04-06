@@ -113,6 +113,87 @@ python music_tagger.py --folder /music/album --rename-pattern "{genre} - {title}
 
 ---
 
+### `--title-from-filename`
+
+Set the title tag from the filename stem instead of reading it from existing metadata. This is the reverse of `--rename`.
+
+All title transforms (`--strip-start`, `--strip-end`, `--remove-special`, `--replace-special`) are applied to the filename stem before the result is saved as the title tag.
+
+- `--title-from-filename` and `--tags-from-filename` are mutually exclusive.
+
+```bash
+# Set the title tag directly from the filename stem, no transforms
+python music_tagger.py --folder /music/album --title-from-filename
+
+# Strip the first 3 characters of the filename before saving as title
+# "01-Get Lucky.mp3" → title tag = "Get Lucky"
+python music_tagger.py --folder /music/album --title-from-filename --strip-start 3
+
+# Replace underscores with spaces in the filename, save as title
+# "get_lucky.mp3" → title tag = "get lucky"
+python music_tagger.py --folder /music/album --title-from-filename --replace-special " " "_"
+
+# Strip a prefix AND replace underscores, then save as title and rename
+# "01_get_lucky.mp3" → title tag = "get lucky", file = "get lucky.mp3"
+python music_tagger.py --folder /music/album --title-from-filename --strip-start 3 --replace-special " " "_" --rename
+```
+
+| Filename              | Command                                      | Title tag set to  |
+|-----------------------|----------------------------------------------|-------------------|
+| `01-Get Lucky.mp3`    | `--title-from-filename --strip-start 3`      | `Get Lucky`       |
+| `get_lucky.mp3`       | `--title-from-filename --replace-special " " "_"` | `get lucky`  |
+| `Come Together.mp3`   | `--title-from-filename`                      | `Come Together`   |
+
+---
+
+### `--tags-from-filename PATTERN`
+
+Parse the filename stem using a `{placeholder}` template to extract and set **multiple tags at once**. This is the reverse of `--rename-pattern`.
+
+**Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{genre}`
+
+- The pattern must match the full filename stem.
+- Non-final placeholders use non-greedy matching so adjacent segments are captured correctly.
+- If the pattern does not match, a warning is printed and the file is skipped.
+- `--tags-from-filename` and `--title-from-filename` are mutually exclusive.
+- Title transforms (`--strip-start`, etc.) still apply to the extracted `{title}` portion.
+
+```bash
+# "01-Get Lucky.mp3" → track tag = "01", title tag = "Get Lucky"
+python music_tagger.py --folder /music/album --tags-from-filename "{track}-{title}"
+
+# "The Beatles - Come Together.mp3" → artist = "The Beatles", title = "Come Together"
+python music_tagger.py --folder /music/album --tags-from-filename "{artist} - {title}"
+
+# "The Beatles - Abbey Road - Come Together.mp3" → artist, album, and title all set
+python music_tagger.py --folder /music/album --tags-from-filename "{artist} - {album} - {title}"
+
+# "1969 - Come Together.mp3" → year = "1969", title = "Come Together"
+python music_tagger.py --folder /music/album --tags-from-filename "{year} - {title}"
+
+# Extract tags from filename, then rename files using a different pattern
+python music_tagger.py --folder /music/album \
+    --tags-from-filename "{track} - {title}" \
+    --rename-pattern "{artist} - {track} - {title}"
+```
+
+| Filename                                    | Pattern                         | Tags set                                        |
+|---------------------------------------------|---------------------------------|-------------------------------------------------|
+| `01-Get Lucky.mp3`                          | `{track}-{title}`               | track=`01`, title=`Get Lucky`                   |
+| `The Beatles - Come Together.mp3`           | `{artist} - {title}`            | artist=`The Beatles`, title=`Come Together`     |
+| `The Beatles - Abbey Road - Come Together.mp3` | `{artist} - {album} - {title}` | artist=`The Beatles`, album=`Abbey Road`, title=`Come Together` |
+| `1969 - Come Together.mp3`                  | `{year} - {title}`              | year=`1969`, title=`Come Together`              |
+
+> **Tip:** Combine with `--tag` to set additional fields that aren't in the filename:
+> ```bash
+> python music_tagger.py --folder /music/album \
+>     --tags-from-filename "{track} - {title}" \
+>     --tag "artist=Daft Punk" \
+>     --tag "album=Random Access Memories"
+> ```
+
+---
+
 ### `--tag KEY=VALUE` / `-t KEY=VALUE`
 
 Set one or more tag fields. Repeat the flag for multiple tags. The tag is applied to every file in the target.
@@ -243,13 +324,19 @@ python music_tagger.py --folder /music/album \
 
 ## Order of Operations
 
-When multiple transform options are combined, they are applied in this order:
+When multiple options are combined, they are applied in this order:
 
-1. `--tag` values are applied (an explicit `--tag title=...` becomes the working title)
-2. `--strip-start` — removes N characters from the start of the title
-3. `--strip-end` — removes N characters from the end of the title
-4. `--remove-special` or `--replace-special` — character cleanup on the title
-5. `--rename` — file renamed to the final title
+1. `--tag` explicit values are collected
+2. `--tags-from-filename` extracts tags from the filename (merges with `--tag` values)
+3. Working title is resolved:
+   - `--title-from-filename` → filename stem
+   - `--tags-from-filename` → extracted `{title}` value (if present)
+   - Otherwise → `--tag title=...` → existing title tag → filename stem
+4. `--strip-start` — removes N characters from the start of the working title
+5. `--strip-end` — removes N characters from the end of the working title
+6. `--remove-special` or `--replace-special` — character cleanup on the working title
+7. Tag changes are written to the file
+8. `--rename` — file renamed to the final title
    **or** `--rename-pattern` — file renamed using the pattern with all final tag values
 
 ---
