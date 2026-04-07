@@ -69,6 +69,64 @@ Fields with no value are shown as blank. `--list` exits immediately after printi
 
 ---
 
+### `--recursive` / `-R`
+
+Process all audio files in every subfolder nested inside the target folder. Without this flag only the immediate contents of `--folder` are processed.
+
+- Only valid with `--folder`. Using `--recursive` with `--file` is an error.
+- Files are processed folder-by-folder. A header is printed before each subfolder so you can follow progress in the console.
+- All other options (`--rename`, `--tag`, `--tags-from-filename`, `--dry-run`, etc.) apply to every file found across all subfolders.
+- Combine with `--list` to inspect an entire library before making changes.
+
+```bash
+# List all files and tags across an entire music library
+python music_tagger.py --folder /music --recursive --list
+
+# Set artist and album on all files in every subfolder
+python music_tagger.py --folder /music/artist --recursive \
+    --tag "artist=The Beatles"
+
+# Rename every file across all subfolders using a pattern
+python music_tagger.py --folder /music --recursive \
+    --rename-pattern "{track} - {title}"
+
+# Extract disc, track, and title from filenames like "1-01 - Come Together.mp3"
+# across all subfolders, without modifying any files first
+python music_tagger.py --folder /music/album --recursive \
+    --tags-from-filename "{disc}-{track} - {title}" \
+    --dry-run
+
+# Replace underscores with spaces in titles across a whole library, then rename
+python music_tagger.py --folder /music --recursive \
+    --replace-special " " "_" \
+    --rename
+```
+
+Example console output for a recursive run:
+
+```
+Found 6 file(s) across 2 folder(s) under '/music/artist'.
+
+============================================================
+Folder: disc1
+============================================================
+
+01 - Come Together.mp3
+  tag artist = 'The Beatles'
+
+02 - Something.mp3
+  tag artist = 'The Beatles'
+
+============================================================
+Folder: disc2
+============================================================
+
+01 - Here Comes the Sun.mp3
+  tag artist = 'The Beatles'
+```
+
+---
+
 ### `--rename` / `-r`
 
 Rename each file so its filename matches its (possibly transformed) title tag. The original file extension is always preserved.
@@ -412,6 +470,16 @@ python music_tagger.py --folder /music/album \
     --tag "artist=The Beatles" \
     --tag "album=Abbey Road" \
     --rename-pattern "{track} - {title}"
+
+# Inspect an entire library before making any changes
+python music_tagger.py --folder /music --recursive --list
+
+# Bulk-tag every file in a library: set genre, strip numeric prefix, rename
+python music_tagger.py --folder /music --recursive \
+    --tag "genre=Rock" \
+    --strip-start 5 \
+    --rename \
+    --dry-run
 ```
 
 ---

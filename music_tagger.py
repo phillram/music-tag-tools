@@ -26,17 +26,18 @@ SUPPORTED_FORMATS = {".mp3", ".flac", ".m4a", ".mp4", ".ogg"}
 # File discovery
 # ---------------------------------------------------------------------------
 
-def get_audio_files(path: Path) -> list[Path]:
+def get_audio_files(path: Path, recursive: bool = False) -> list[Path]:
     if path.is_file():
         if path.suffix.lower() in SUPPORTED_FORMATS:
             return [path]
         print(f"Error: '{path.name}' is not a supported audio format.")
         sys.exit(1)
     if path.is_dir():
+        glob = path.rglob if recursive else path.glob
         files = []
         for fmt in SUPPORTED_FORMATS:
-            files.extend(path.glob(f"*{fmt}"))
-            files.extend(path.glob(f"*{fmt.upper()}"))
+            files.extend(glob(f"*{fmt}"))
+            files.extend(glob(f"*{fmt.upper()}"))
         return sorted(set(files))
     print(f"Error: '{path}' does not exist.")
     sys.exit(1)
@@ -479,6 +480,15 @@ Examples:
   # List all files and their current tags (no modifications)
   python music_tagger.py --folder /music/album --list
 
+  # Process all nested subfolders recursively
+  python music_tagger.py --folder /music --recursive --tag "artist=The Beatles"
+
+  # Recursive rename using a pattern across an entire library
+  python music_tagger.py --folder /music --recursive --rename-pattern "{track} - {title}"
+
+  # Recursive dry run to preview changes across all subfolders
+  python music_tagger.py --folder /music --recursive --strip-start 3 --rename --dry-run
+
   # Dry run: preview every change without touching files
   python music_tagger.py --folder /music/album --strip-start 3 --rename --dry-run
         """,
@@ -543,6 +553,11 @@ Examples:
               "Example: --replace-special \" \" \"_\" \"-\""),
     )
 
+    parser.add_argument("--recursive", "-R", action="store_true",
+                        help=("Process all subfolders inside the target folder recursively. "
+                              "Only valid with --folder. Each subfolder's files are listed "
+                              "and processed as a group."))
+
     parser.add_argument("--list", "-l", action="store_true",
                         help=("Display a table of all files and their current tags. "
                               "No files are modified. Cannot be combined with other options."))
@@ -557,8 +572,11 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.recursive and args.file:
+        parser.error("--recursive can only be used with --folder, not --file.")
+
     target = args.folder or args.file
-    files = get_audio_files(target)
+    files = get_audio_files(target, recursive=getattr(args, "recursive", False))
 
     if not files:
         print("No supported audio files found.")
@@ -571,10 +589,26 @@ def main() -> None:
     if args.dry_run:
         print("=== DRY RUN — no files will be modified ===")
 
-    print(f"Found {len(files)} file(s) in '{target}'.")
+    if args.recursive:
+        # Group by parent directory and process each folder in turn
+        folders: dict[Path, list[Path]] = {}
+        for f in files:
+            folders.setdefault(f.parent, []).append(f)
 
-    for file_path in files:
-        process_file(file_path, args)
+        total = sum(len(v) for v in folders.values())
+        print(f"Found {total} file(s) across {len(folders)} folder(s) under '{target}'.")
+
+        for folder, folder_files in sorted(folders.items()):
+            rel = folder.relative_to(target)
+            print(f"\n{'='*60}")
+            print(f"Folder: {rel if str(rel) != '.' else '(root)'}")
+            print(f"{'='*60}")
+            for file_path in sorted(folder_files):
+                process_file(file_path, args)
+    else:
+        print(f"Found {len(files)} file(s) in '{target}'.")
+        for file_path in files:
+            process_file(file_path, args)
 
     print("\nDone.")
 
