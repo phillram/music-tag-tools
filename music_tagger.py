@@ -47,6 +47,36 @@ def get_audio_files(path: Path, recursive: bool = False) -> list[Path]:
 # Tag reading
 # ---------------------------------------------------------------------------
 
+def _clean(value: str) -> str:
+    """
+    Normalise a raw tag string into a plain, usable value.
+
+    Handles two common encodings for compound fields like track number:
+      - Slash-separated:  "13/44"   → "13"  (standard ID3 / Vorbis format)
+      - Null-separated:   "13\x0044" → "13"  (non-standard but seen in the wild)
+
+    The slash split is applied after the null split so both variants are caught.
+    For non-compound fields (title, artist, etc.) neither character appears, so
+    the value passes through unchanged.
+    """
+    return value.split("\x00")[0].split("/")[0].strip()
+
+
+def _id3_text(audio, frame_id: str) -> str:
+    """
+    Safely read the first text value from a mutagen ID3 text frame.
+
+    Using str(frame) is unreliable because mutagen joins multiple text values
+    with null bytes (the ID3 multi-value separator), which can corrupt the
+    string when those null bytes are later stripped.  Accessing .text[0]
+    directly avoids that issue entirely.
+    """
+    frame = audio.get(frame_id)
+    if frame is None or not frame.text:
+        return ""
+    return _clean(str(frame.text[0]))
+
+
 def read_tags(file_path: Path) -> dict:
     """Return a dict with keys: title, artist, album, year, track, disc, genre."""
     tags = {k: "" for k in ("title", "artist", "album", "year", "track", "disc", "genre")}
@@ -58,31 +88,31 @@ def read_tags(file_path: Path) -> dict:
                 audio = ID3(file_path)
             except ID3NoHeaderError:
                 return tags
-            tags["title"]  = str(audio.get("TIT2", ""))
-            tags["artist"] = str(audio.get("TPE1", ""))
-            tags["album"]  = str(audio.get("TALB", ""))
-            tags["year"]   = str(audio.get("TDRC", ""))
-            tags["track"]  = str(audio.get("TRCK", ""))
-            tags["disc"]   = str(audio.get("TPOS", ""))
-            tags["genre"]  = str(audio.get("TCON", ""))
+            tags["title"]  = _id3_text(audio, "TIT2")
+            tags["artist"] = _id3_text(audio, "TPE1")
+            tags["album"]  = _id3_text(audio, "TALB")
+            tags["year"]   = _id3_text(audio, "TDRC")
+            tags["track"]  = _id3_text(audio, "TRCK")
+            tags["disc"]   = _id3_text(audio, "TPOS")
+            tags["genre"]  = _id3_text(audio, "TCON")
 
         elif suffix == ".flac":
             audio = FLAC(file_path)
-            tags["title"]  = audio.get("title",       [""])[0]
-            tags["artist"] = audio.get("artist",      [""])[0]
-            tags["album"]  = audio.get("album",       [""])[0]
-            tags["year"]   = audio.get("date",        [""])[0]
-            tags["track"]  = audio.get("tracknumber", [""])[0]
-            tags["disc"]   = audio.get("discnumber",  [""])[0]
-            tags["genre"]  = audio.get("genre",       [""])[0]
+            tags["title"]  = _clean(audio.get("title",       [""])[0])
+            tags["artist"] = _clean(audio.get("artist",      [""])[0])
+            tags["album"]  = _clean(audio.get("album",       [""])[0])
+            tags["year"]   = _clean(audio.get("date",        [""])[0])
+            tags["track"]  = _clean(audio.get("tracknumber", [""])[0])
+            tags["disc"]   = _clean(audio.get("discnumber",  [""])[0])
+            tags["genre"]  = _clean(audio.get("genre",       [""])[0])
 
         elif suffix in (".m4a", ".mp4"):
             audio = MP4(file_path)
-            tags["title"]  = audio.get("\xa9nam", [""])[0]
-            tags["artist"] = audio.get("\xa9ART", [""])[0]
-            tags["album"]  = audio.get("\xa9alb", [""])[0]
-            tags["year"]   = audio.get("\xa9day", [""])[0]
-            tags["genre"]  = audio.get("\xa9gen", [""])[0]
+            tags["title"]  = _clean(audio.get("\xa9nam", [""])[0])
+            tags["artist"] = _clean(audio.get("\xa9ART", [""])[0])
+            tags["album"]  = _clean(audio.get("\xa9alb", [""])[0])
+            tags["year"]   = _clean(audio.get("\xa9day", [""])[0])
+            tags["genre"]  = _clean(audio.get("\xa9gen", [""])[0])
             trkn = audio.get("trkn", [(0, 0)])
             tags["track"]  = str(trkn[0][0]) if trkn and trkn[0][0] else ""
             disk = audio.get("disk", [(0, 0)])
@@ -90,13 +120,13 @@ def read_tags(file_path: Path) -> dict:
 
         elif suffix == ".ogg":
             audio = OggVorbis(file_path)
-            tags["title"]  = audio.get("title",       [""])[0]
-            tags["artist"] = audio.get("artist",      [""])[0]
-            tags["album"]  = audio.get("album",       [""])[0]
-            tags["year"]   = audio.get("date",        [""])[0]
-            tags["track"]  = audio.get("tracknumber", [""])[0]
-            tags["disc"]   = audio.get("discnumber",  [""])[0]
-            tags["genre"]  = audio.get("genre",       [""])[0]
+            tags["title"]  = _clean(audio.get("title",       [""])[0])
+            tags["artist"] = _clean(audio.get("artist",      [""])[0])
+            tags["album"]  = _clean(audio.get("album",       [""])[0])
+            tags["year"]   = _clean(audio.get("date",        [""])[0])
+            tags["track"]  = _clean(audio.get("tracknumber", [""])[0])
+            tags["disc"]   = _clean(audio.get("discnumber",  [""])[0])
+            tags["genre"]  = _clean(audio.get("genre",       [""])[0])
 
     except Exception as exc:
         print(f"  Warning: Could not read tags from '{file_path.name}': {exc}")
@@ -275,8 +305,8 @@ def parse_filename_pattern(pattern: str, stem: str) -> dict:
 
 def rename_file(file_path: Path, new_stem: str, dry_run: bool) -> Path:
     """Rename file_path using new_stem, preserving the extension."""
-    # Sanitise: remove characters that are illegal in Windows/POSIX filenames
-    safe_stem = re.sub(r'[\\/:*?"<>|]', "", new_stem).strip()
+    # Sanitise: remove null bytes and characters that are illegal in Windows/POSIX filenames
+    safe_stem = re.sub(r'[\x00\\/:*?"<>|]', "", new_stem).strip()
     if not safe_stem:
         print("  Warning: filename is empty after sanitisation — skipping rename.")
         return file_path
