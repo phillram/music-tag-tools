@@ -94,7 +94,7 @@ python music_tagger.py --file /music/01_cool_song.mp3 --rename
 
 Rename each file using a template string built from its tag values. Use curly-brace placeholders for any tag field.
 
-**Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{genre}`
+**Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{disc}` `{genre}`
 
 - Missing or empty tags are substituted with an empty string.
 - The file extension is always preserved.
@@ -176,7 +176,7 @@ python music_tagger.py --folder /music/album --title-from-filename --strip-start
 
 Parse the filename stem using a `{placeholder}` template to extract and set **multiple tags at once**. This is the reverse of `--rename-pattern`.
 
-**Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{genre}`
+**Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{disc}` `{genre}`
 
 - The pattern must match the full filename stem.
 - Non-final placeholders use non-greedy matching so adjacent segments are captured correctly.
@@ -197,6 +197,9 @@ python music_tagger.py --folder /music/album --tags-from-filename "{artist} - {a
 # "1969 - Come Together.mp3" → year = "1969", title = "Come Together"
 python music_tagger.py --folder /music/album --tags-from-filename "{year} - {title}"
 
+# "1-01 - Come Together.mp3" → disc = "1", track = "01", title = "Come Together"
+python music_tagger.py --folder /music/album --tags-from-filename "{disc}-{track} - {title}"
+
 # Extract tags from filename, then rename files using a different pattern
 python music_tagger.py --folder /music/album \
     --tags-from-filename "{track} - {title}" \
@@ -209,6 +212,7 @@ python music_tagger.py --folder /music/album \
 | `The Beatles - Come Together.mp3`           | `{artist} - {title}`            | artist=`The Beatles`, title=`Come Together`     |
 | `The Beatles - Abbey Road - Come Together.mp3` | `{artist} - {album} - {title}` | artist=`The Beatles`, album=`Abbey Road`, title=`Come Together` |
 | `1969 - Come Together.mp3`                  | `{year} - {title}`              | year=`1969`, title=`Come Together`              |
+| `1-01 - Come Together.mp3`                  | `{disc}-{track} - {title}`      | disc=`1`, track=`01`, title=`Come Together`     |
 
 > **Tip:** Combine with `--tag` to set additional fields that aren't in the filename:
 > ```bash
@@ -224,7 +228,7 @@ python music_tagger.py --folder /music/album \
 
 Set one or more tag fields. Repeat the flag for multiple tags. The tag is applied to every file in the target.
 
-**Supported keys:** `title`, `artist`, `album`, `year`, `track`, `genre`
+**Supported keys:** `title`, `artist`, `album`, `year`, `track`, `disc`, `genre`
 
 ```bash
 # Set the artist and album on all files in a folder
@@ -234,6 +238,9 @@ python music_tagger.py --folder /music/album \
 
 # Set the year on a single file
 python music_tagger.py --file /music/song.mp3 --tag "year=1969"
+
+# Set the disc number on all files in a folder
+python music_tagger.py --folder /music/disc1 --tag "disc=1"
 ```
 
 ---
@@ -391,17 +398,32 @@ python music_tagger.py --file "/music/01_-_come_together_(remaster).mp3" \
     --strip-end 11 \
     --replace-special " " "_" \
     --rename
+
+# Tag a multi-disc album: filenames like "1-01 - Come Together.mp3"
+# Sets disc, track, and title from filename; sets artist and album manually
+python music_tagger.py --folder /music/album \
+    --tags-from-filename "{disc}-{track} - {title}" \
+    --tag "artist=The Beatles" \
+    --tag "album=Abbey Road"
+
+# Same as above but also rename files to strip the disc prefix
+python music_tagger.py --folder /music/album \
+    --tags-from-filename "{disc}-{track} - {title}" \
+    --tag "artist=The Beatles" \
+    --tag "album=Abbey Road" \
+    --rename-pattern "{track} - {title}"
 ```
 
 ---
 
 ## Supported Tag Keys
 
-| Key      | Description              | Example value         |
-|----------|--------------------------|-----------------------|
-| `title`  | Track title              | `Come Together`       |
-| `artist` | Track / performing artist| `The Beatles`         |
-| `album`  | Album name               | `Abbey Road`          |
-| `year`   | Release year             | `1969`                |
-| `track`  | Track number             | `1`                   |
-| `genre`  | Genre                    | `Rock`                |
+| Key      | Description               | Example value         |
+|----------|---------------------------|-----------------------|
+| `title`  | Track title               | `Come Together`       |
+| `artist` | Track / performing artist | `The Beatles`         |
+| `album`  | Album name                | `Abbey Road`          |
+| `year`   | Release year              | `1969`                |
+| `track`  | Track number              | `1`                   |
+| `disc`   | Disc number               | `1`                   |
+| `genre`  | Genre                     | `Rock`                |

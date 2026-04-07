@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 try:
-    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, ID3NoHeaderError
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPOS, ID3NoHeaderError
     from mutagen.flac import FLAC
     from mutagen.mp4 import MP4
     from mutagen.oggvorbis import OggVorbis
@@ -47,8 +47,8 @@ def get_audio_files(path: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 def read_tags(file_path: Path) -> dict:
-    """Return a dict with keys: title, artist, album, year, track, genre."""
-    tags = {k: "" for k in ("title", "artist", "album", "year", "track", "genre")}
+    """Return a dict with keys: title, artist, album, year, track, disc, genre."""
+    tags = {k: "" for k in ("title", "artist", "album", "year", "track", "disc", "genre")}
     suffix = file_path.suffix.lower()
 
     try:
@@ -62,6 +62,7 @@ def read_tags(file_path: Path) -> dict:
             tags["album"]  = str(audio.get("TALB", ""))
             tags["year"]   = str(audio.get("TDRC", ""))
             tags["track"]  = str(audio.get("TRCK", ""))
+            tags["disc"]   = str(audio.get("TPOS", ""))
             tags["genre"]  = str(audio.get("TCON", ""))
 
         elif suffix == ".flac":
@@ -71,6 +72,7 @@ def read_tags(file_path: Path) -> dict:
             tags["album"]  = audio.get("album",       [""])[0]
             tags["year"]   = audio.get("date",        [""])[0]
             tags["track"]  = audio.get("tracknumber", [""])[0]
+            tags["disc"]   = audio.get("discnumber",  [""])[0]
             tags["genre"]  = audio.get("genre",       [""])[0]
 
         elif suffix in (".m4a", ".mp4"):
@@ -82,6 +84,8 @@ def read_tags(file_path: Path) -> dict:
             tags["genre"]  = audio.get("\xa9gen", [""])[0]
             trkn = audio.get("trkn", [(0, 0)])
             tags["track"]  = str(trkn[0][0]) if trkn and trkn[0][0] else ""
+            disk = audio.get("disk", [(0, 0)])
+            tags["disc"]   = str(disk[0][0]) if disk and disk[0][0] else ""
 
         elif suffix == ".ogg":
             audio = OggVorbis(file_path)
@@ -90,6 +94,7 @@ def read_tags(file_path: Path) -> dict:
             tags["album"]  = audio.get("album",       [""])[0]
             tags["year"]   = audio.get("date",        [""])[0]
             tags["track"]  = audio.get("tracknumber", [""])[0]
+            tags["disc"]   = audio.get("discnumber",  [""])[0]
             tags["genre"]  = audio.get("genre",       [""])[0]
 
     except Exception as exc:
@@ -118,7 +123,7 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
                 audio = ID3()
             frame_map = {
                 "title":  TIT2, "artist": TPE1, "album": TALB,
-                "year":   TDRC, "track":  TRCK, "genre": TCON,
+                "year":   TDRC, "track":  TRCK, "disc":  TPOS, "genre": TCON,
             }
             for key, value in updates.items():
                 if key in frame_map:
@@ -130,7 +135,7 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
             audio = FLAC(file_path)
             key_map = {
                 "title": "title", "artist": "artist", "album": "album",
-                "year": "date", "track": "tracknumber", "genre": "genre",
+                "year": "date", "track": "tracknumber", "disc": "discnumber", "genre": "genre",
             }
             for key, value in updates.items():
                 if key in key_map:
@@ -144,7 +149,12 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
                 "year": "\xa9day", "genre": "\xa9gen",
             }
             for key, value in updates.items():
-                if key in key_map:
+                if key == "disc":
+                    try:
+                        audio["disk"] = [(int(value), 0)]
+                    except ValueError:
+                        print(f"  Warning: disc value '{value}' is not a number — skipping")
+                elif key in key_map:
                     audio[key_map[key]] = [value]
             audio.save()
 
@@ -152,7 +162,7 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
             audio = OggVorbis(file_path)
             key_map = {
                 "title": "title", "artist": "artist", "album": "album",
-                "year": "date", "track": "tracknumber", "genre": "genre",
+                "year": "date", "track": "tracknumber", "disc": "discnumber", "genre": "genre",
             }
             for key, value in updates.items():
                 if key in key_map:
@@ -211,7 +221,7 @@ def apply_transforms(title: str, args: argparse.Namespace) -> str:
 # File renaming
 # ---------------------------------------------------------------------------
 
-PATTERN_KEYS = ("title", "artist", "album", "year", "track", "genre")
+PATTERN_KEYS = ("title", "artist", "album", "year", "track", "disc", "genre")
 
 
 def build_filename_from_pattern(pattern: str, tags: dict) -> str:
@@ -292,10 +302,10 @@ def rename_file(file_path: Path, new_stem: str, dry_run: bool) -> Path:
 # Listing / inspection
 # ---------------------------------------------------------------------------
 
-COLUMNS = ("filename", "title", "artist", "album", "year", "track", "genre")
+COLUMNS = ("filename", "title", "artist", "album", "year", "disc", "track", "genre")
 COL_HEADERS = {
     "filename": "Filename", "title": "Title", "artist": "Artist",
-    "album": "Album", "year": "Year", "track": "#", "genre": "Genre",
+    "album": "Album", "year": "Year", "disc": "Disc", "track": "#", "genre": "Genre",
 }
 
 
@@ -351,7 +361,7 @@ def process_file(file_path: Path, args: argparse.Namespace) -> None:
                 continue
             key, _, value = pair.partition("=")
             key = key.lower().strip()
-            if key not in ("title", "artist", "album", "year", "track", "genre"):
+            if key not in ("title", "artist", "album", "year", "track", "disc", "genre"):
                 print(f"  Warning: unknown tag key '{key}' — skipping")
                 continue
             updates[key] = value.strip()
@@ -457,6 +467,12 @@ Examples:
   # Parse filename pattern to set track number and title tags
   python music_tagger.py --folder /music/album --tags-from-filename "{track} - {title}"
 
+  # Parse disc and track from filename: "1-01 - Come Together"
+  python music_tagger.py --folder /music/album --tags-from-filename "{disc}-{track} - {title}"
+
+  # Set disc number manually
+  python music_tagger.py --folder /music/disc1 --tag "disc=1"
+
   # Parse artist and title from filename, then rename using a different pattern
   python music_tagger.py --folder /music/album --tags-from-filename "{artist} - {title}" --rename-pattern "{artist} - {title}"
 
@@ -502,7 +518,7 @@ Examples:
 
     parser.add_argument("--tag", "-t", action="append", metavar="KEY=VALUE",
                         help=("Set a tag. Repeatable. "
-                              "Keys: title, artist, album, year, track, genre. "
+                              "Keys: title, artist, album, year, track, disc, genre. "
                               "Example: --tag \"artist=Daft Punk\""))
 
     parser.add_argument("--strip-start", type=int, metavar="N",
