@@ -51,18 +51,28 @@ def _clean(value: str) -> str:
     """
     Normalise a raw tag string into a plain, usable value.
 
-    Handles two common encodings for compound fields like track number:
-      - Slash-separated:  "13/44"   → "13"  (standard ID3 / Vorbis format)
+    Mutagen joins multiple text values with a null byte (the ID3 multi-value
+    separator), so only the portion before the first null is kept.
+    """
+    return value.split("\x00")[0].strip()
+
+
+def _clean_number(value: str) -> str:
+    """
+    Normalise a compound numeric tag such as track or disc.
+
+    Two encodings are common:
+      - Slash-separated:  "13/44"    → "13"  (standard ID3 / Vorbis format)
       - Null-separated:   "13\x0044" → "13"  (non-standard but seen in the wild)
 
-    The slash split is applied after the null split so both variants are caught.
-    For non-compound fields (title, artist, etc.) neither character appears, so
-    the value passes through unchanged.
+    Only numeric fields go through this.  A text field must not: a title like
+    "Pokémon Sun/Moon - Ending Theme Lofi" is not a number-over-total, and
+    splitting it on "/" would silently truncate it to "Pokémon Sun".
     """
-    return value.split("\x00")[0].split("/")[0].strip()
+    return _clean(value).split("/")[0].strip()
 
 
-def _id3_text(audio, frame_id: str) -> str:
+def _id3_text(audio, frame_id: str, numeric: bool = False) -> str:
     """
     Safely read the first text value from a mutagen ID3 text frame.
 
@@ -70,11 +80,14 @@ def _id3_text(audio, frame_id: str) -> str:
     with null bytes (the ID3 multi-value separator), which can corrupt the
     string when those null bytes are later stripped.  Accessing .text[0]
     directly avoids that issue entirely.
+
+    Set numeric=True for compound number/total frames such as TRCK and TPOS.
     """
     frame = audio.get(frame_id)
     if frame is None or not frame.text:
         return ""
-    return _clean(str(frame.text[0]))
+    raw = str(frame.text[0])
+    return _clean_number(raw) if numeric else _clean(raw)
 
 
 def read_tags(file_path: Path) -> dict:
@@ -92,8 +105,8 @@ def read_tags(file_path: Path) -> dict:
             tags["artist"] = _id3_text(audio, "TPE1")
             tags["album"]  = _id3_text(audio, "TALB")
             tags["year"]   = _id3_text(audio, "TDRC")
-            tags["track"]  = _id3_text(audio, "TRCK")
-            tags["disc"]   = _id3_text(audio, "TPOS")
+            tags["track"]  = _id3_text(audio, "TRCK", numeric=True)
+            tags["disc"]   = _id3_text(audio, "TPOS", numeric=True)
             tags["genre"]  = _id3_text(audio, "TCON")
 
         elif suffix == ".flac":
@@ -101,10 +114,10 @@ def read_tags(file_path: Path) -> dict:
             tags["title"]  = _clean(audio.get("title",       [""])[0])
             tags["artist"] = _clean(audio.get("artist",      [""])[0])
             tags["album"]  = _clean(audio.get("album",       [""])[0])
-            tags["year"]   = _clean(audio.get("date",        [""])[0])
-            tags["track"]  = _clean(audio.get("tracknumber", [""])[0])
-            tags["disc"]   = _clean(audio.get("discnumber",  [""])[0])
-            tags["genre"]  = _clean(audio.get("genre",       [""])[0])
+            tags["year"]   = _clean(audio.get("date",               [""])[0])
+            tags["track"]  = _clean_number(audio.get("tracknumber", [""])[0])
+            tags["disc"]   = _clean_number(audio.get("discnumber",  [""])[0])
+            tags["genre"]  = _clean(audio.get("genre",              [""])[0])
 
         elif suffix in (".m4a", ".mp4"):
             audio = MP4(file_path)
@@ -123,10 +136,10 @@ def read_tags(file_path: Path) -> dict:
             tags["title"]  = _clean(audio.get("title",       [""])[0])
             tags["artist"] = _clean(audio.get("artist",      [""])[0])
             tags["album"]  = _clean(audio.get("album",       [""])[0])
-            tags["year"]   = _clean(audio.get("date",        [""])[0])
-            tags["track"]  = _clean(audio.get("tracknumber", [""])[0])
-            tags["disc"]   = _clean(audio.get("discnumber",  [""])[0])
-            tags["genre"]  = _clean(audio.get("genre",       [""])[0])
+            tags["year"]   = _clean(audio.get("date",               [""])[0])
+            tags["track"]  = _clean_number(audio.get("tracknumber", [""])[0])
+            tags["disc"]   = _clean_number(audio.get("discnumber",  [""])[0])
+            tags["genre"]  = _clean(audio.get("genre",              [""])[0])
 
     except Exception as exc:
         print(f"  Warning: Could not read tags from '{file_path.name}': {exc}")
@@ -324,8 +337,11 @@ def parse_filename_pattern(pattern: str, stem: str) -> dict:
 
 def rename_file(file_path: Path, new_stem: str, dry_run: bool) -> Path:
     """Rename file_path using new_stem, preserving the extension."""
-    # Sanitise: remove null bytes and characters that are illegal in Windows/POSIX filenames
-    safe_stem = re.sub(r'[\x00\\/:*?"<>|]', "", new_stem).strip()
+    # Sanitise for Windows/POSIX. Null bytes are dropped, but the remaining
+    # illegal characters become "_" rather than being deleted, so a separator
+    # inside a title survives: "Pokémon Sun/Moon" renames to "Pokémon Sun_Moon",
+    # not "Pokémon SunMoon" (likewise "AC/DC" -> "AC_DC", not "ACDC").
+    safe_stem = re.sub(r'[\\/:*?"<>|]', "_", new_stem.replace("\x00", "")).strip()
     if not safe_stem:
         print("  Warning: filename is empty after sanitisation — skipping rename.")
         return file_path

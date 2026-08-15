@@ -131,7 +131,7 @@ Folder: disc2
 
 Rename each file so its filename matches its (possibly transformed) title tag. The original file extension is always preserved.
 
-Characters that are illegal in filenames (`\ / : * ? " < > |`) are automatically stripped before renaming.
+Characters that are illegal in filenames (`\ / : * ? " < > |`) are automatically replaced with `_` before renaming, so separators inside a title survive — a title of `Pokémon Sun/Moon` becomes `Pokémon Sun_Moon.mp3`, and `AC/DC` becomes `AC_DC`.
 
 ```bash
 # Rename every file in a folder to match its embedded title tag
@@ -156,7 +156,7 @@ Rename each file using a template string built from its tag values. Use curly-br
 
 - Missing or empty tags are substituted with an empty string.
 - The file extension is always preserved.
-- Illegal filename characters are stripped automatically.
+- Illegal filename characters are replaced with `_` automatically.
 - `--rename-pattern` and `--rename` are mutually exclusive.
 
 #### Zero-padding numbers
