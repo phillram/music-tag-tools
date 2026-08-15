@@ -154,7 +154,7 @@ Rename each file using a template string built from its tag values. Use curly-br
 
 **Available placeholders:** `{title}` `{artist}` `{album}` `{year}` `{track}` `{disc}` `{genre}`
 
-- Missing or empty tags are substituted with an empty string.
+- Missing or empty tags are substituted with an empty string, and take an adjacent separator with them — a file with no track number renames to `Title.mp3` under `{track:02} - {title}`, not `- Title.mp3`. Only separators next to an empty placeholder are removed, so a title that genuinely starts or ends with punctuation keeps it.
 - The file extension is always preserved.
 - Illegal filename characters are replaced with `_` automatically.
 - `--rename-pattern` and `--rename` are mutually exclusive.

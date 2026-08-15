@@ -279,17 +279,41 @@ def build_filename_from_pattern(pattern: str, tags: dict) -> str:
     A placeholder may carry a zero-pad width: "{track:02}" renders a track tag
     of "7" as "07", so filenames sort correctly past track 9.  Padding applies
     only to purely numeric values; anything else is substituted unchanged.
+
+    A placeholder whose tag is empty takes an adjacent separator with it, so a
+    file with no track number renders "{track:02} - {title}" as "Title" rather
+    than a dangling "- Title".  The separator after the empty placeholder is
+    dropped, or the one before it when the placeholder is last in the pattern.
     """
-    def substitute(match: re.Match) -> str:
+    # Tokenise into alternating literal / placeholder parts: lit, ph, lit, ...
+    # Unknown placeholders are not tokenised, so they stay in the literal text.
+    tokens: list[str] = []
+    pos = 0
+    for match in _PLACEHOLDER_RE.finditer(pattern):
         key, width = match.group(1), match.group(2)
         if key not in PATTERN_KEYS:
-            return match.group(0)  # leave unknown placeholders as literal text
+            continue
         value = tags.get(key, "")
         if width and value.isdigit():
             value = value.zfill(int(width))
-        return value
+        tokens.append(pattern[pos:match.start()])
+        tokens.append(value)
+        pos = match.end()
+    tokens.append(pattern[pos:])
 
-    return _PLACEHOLDER_RE.sub(substitute, pattern)
+    # Odd indices are placeholders. An empty one drops the separator that
+    # follows it, falling back to the one before when nothing follows.
+    dropped: set[int] = set()
+    for i in range(1, len(tokens), 2):
+        if tokens[i]:
+            continue
+        dropped.add(i)
+        if i + 1 < len(tokens) and tokens[i + 1]:
+            dropped.add(i + 1)
+        else:
+            dropped.add(i - 1)
+
+    return "".join(text for i, text in enumerate(tokens) if i not in dropped)
 
 
 def parse_filename_pattern(pattern: str, stem: str) -> dict:
