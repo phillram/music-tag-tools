@@ -254,27 +254,45 @@ def apply_transforms(title: str, args: argparse.Namespace) -> str:
 
 PATTERN_KEYS = ("title", "artist", "album", "year", "track", "disc", "genre")
 
+# A placeholder is {key} with an optional zero-pad width, e.g. {track:02}.
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)(?::(\d+))?\}")
+
 
 def build_filename_from_pattern(pattern: str, tags: dict) -> str:
     """
-    Substitute {title}, {artist}, {album}, {year}, {track}, {genre} in pattern.
-    Missing tags are replaced with an empty string.
+    Substitute {title}, {artist}, {album}, {year}, {track}, {disc}, {genre} in
+    pattern.  Missing tags are replaced with an empty string.
+
+    A placeholder may carry a zero-pad width: "{track:02}" renders a track tag
+    of "7" as "07", so filenames sort correctly past track 9.  Padding applies
+    only to purely numeric values; anything else is substituted unchanged.
     """
-    result = pattern
-    for key in PATTERN_KEYS:
-        result = result.replace(f"{{{key}}}", tags.get(key, ""))
-    return result
+    def substitute(match: re.Match) -> str:
+        key, width = match.group(1), match.group(2)
+        if key not in PATTERN_KEYS:
+            return match.group(0)  # leave unknown placeholders as literal text
+        value = tags.get(key, "")
+        if width and value.isdigit():
+            value = value.zfill(int(width))
+        return value
+
+    return _PLACEHOLDER_RE.sub(substitute, pattern)
 
 
 def parse_filename_pattern(pattern: str, stem: str) -> dict:
     """
     Extract tag values from a filename stem using a {key} template pattern.
     Returns a dict of {tag_key: value}. Returns {} if the pattern does not match.
+
+    A zero-pad width is accepted for symmetry with --rename-pattern (so the same
+    pattern string works in both directions) but has no effect when reading:
+    "{track:02}" captures "07" and "7" alike.
     """
-    keys = re.findall(r"\{(\w+)\}", pattern)
-    if not keys:
+    placeholders = list(_PLACEHOLDER_RE.finditer(pattern))
+    if not placeholders:
         return {}
 
+    keys = [m.group(1) for m in placeholders]
     duplicates = [k for k in keys if keys.count(k) > 1]
     if duplicates:
         print(f"  Warning: duplicate placeholder(s) in pattern: {set(duplicates)} — skipping")
@@ -284,9 +302,10 @@ def parse_filename_pattern(pattern: str, stem: str) -> dict:
     # named capture groups. Non-final groups use non-greedy matching so that
     # adjacent segments don't bleed into each other.
     escaped = re.escape(pattern)
-    for i, key in enumerate(keys):
-        escaped_ph = re.escape(f"{{{key}}}")
-        group = f"(?P<{key}>.+?)" if i < len(keys) - 1 else f"(?P<{key}>.+)"
+    for i, placeholder in enumerate(placeholders):
+        key = placeholder.group(1)
+        escaped_ph = re.escape(placeholder.group(0))
+        group = f"(?P<{key}>.+?)" if i < len(placeholders) - 1 else f"(?P<{key}>.+)"
         escaped = escaped.replace(escaped_ph, group, 1)
 
     match = re.fullmatch(escaped, stem)
@@ -351,6 +370,7 @@ def list_files(files: list[Path]) -> None:
             "artist":   tags["artist"],
             "album":    tags["album"],
             "year":     tags["year"],
+            "disc":     tags["disc"],
             "track":    tags["track"],
             "genre":    tags["genre"],
         })
@@ -538,8 +558,9 @@ Examples:
     rename_group.add_argument(
         "--rename-pattern", metavar="PATTERN",
         help=("Rename the file using a template built from tag placeholders. "
-              "Available placeholders: {title} {artist} {album} {year} {track} {genre}. "
-              "Example: --rename-pattern \"{track} - {title}\""),
+              "Available placeholders: {title} {artist} {album} {year} {track} {disc} {genre}. "
+              "Add a zero-pad width to numeric fields, e.g. {track:02} renders 7 as 07. "
+              "Example: --rename-pattern \"{track:02} - {title}\""),
     )
 
     from_filename_group = parser.add_mutually_exclusive_group()

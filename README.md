@@ -58,11 +58,11 @@ python music_tagger.py --file /music/song.mp3 --list
 Example output:
 
 ```
-Filename                          Title           Artist         Album          Year  #   Genre
----------------------------------  --------------  -------------  ------------   ----  --  -----
-01 - Come Together.mp3            Come Together   The Beatles    Abbey Road     1969  1   Rock
-02 - Something.mp3                Something       The Beatles    Abbey Road     1969  2   Rock
-03 - Maxwell's Silver Hammer.mp3                  The Beatles    Abbey Road     1969  3
+Filename                          Title           Artist         Album          Year  Disc  #   Genre
+--------------------------------  --------------  -------------  ------------   ----  ----  --  -----
+01 - Come Together.mp3            Come Together   The Beatles    Abbey Road     1969  1     1   Rock
+02 - Something.mp3                Something       The Beatles    Abbey Road     1969  1     2   Rock
+03 - Maxwell's Silver Hammer.mp3                  The Beatles    Abbey Road     1969  1     3
 ```
 
 Fields with no value are shown as blank. `--list` exits immediately after printing and cannot be combined with any other option.
@@ -159,9 +159,31 @@ Rename each file using a template string built from its tag values. Use curly-br
 - Illegal filename characters are stripped automatically.
 - `--rename-pattern` and `--rename` are mutually exclusive.
 
+#### Zero-padding numbers
+
+Append `:N` to a placeholder to zero-pad it to **N** digits. Without padding, a
+25-track album sorts as 1, 10, 11, … 2, 20 — pad the track number to fix it.
+
+```bash
+# Zero-padded track number: "07 - Terminal March.mp3"
+python music_tagger.py --folder /music/album --rename-pattern "{track:02} - {title}"
+```
+
+| Pattern              | Track tag | Result             |
+|----------------------|-----------|--------------------|
+| `{track} - {title}`  | `7`       | `7 - Title.mp3`    |
+| `{track:02} - {title}` | `7`     | `07 - Title.mp3`   |
+| `{track:03} - {title}` | `7`     | `007 - Title.mp3`  |
+| `{track:02} - {title}` | `12`    | `12 - Title.mp3`   |
+
+Padding applies only to values that are entirely digits; any other value is
+substituted unchanged. `--tags-from-filename` accepts the same `:N` syntax so a
+single pattern string works in both directions, but ignores it when reading —
+`{track:02}` captures `07` and `7` alike.
+
 ```bash
 # Track number then title: "01 - Come Together.mp3"
-python music_tagger.py --folder /music/album --rename-pattern "{track} - {title}"
+python music_tagger.py --folder /music/album --rename-pattern "{track:02} - {title}"
 
 # Artist then title: "The Beatles - Come Together.mp3"
 python music_tagger.py --folder /music/album --rename-pattern "{artist} - {title}"
