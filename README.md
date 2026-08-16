@@ -512,8 +512,20 @@ python music_tagger.py --folder /music --recursive \
 |----------|---------------------------|-----------------------|
 | `title`  | Track title               | `Come Together`       |
 | `artist` | Track / performing artist | `The Beatles`         |
+| `albumartist` | Artist the album is filed under | `The Beatles` |
 | `album`  | Album name                | `Abbey Road`          |
 | `year`   | Release year              | `1969`                |
 | `track`  | Track number              | `1`                   |
 | `disc`   | Disc number               | `1`                   |
 | `genre`  | Genre                     | `Rock`                |
+
+> **`albumartist` vs `artist`:** library managers group an album by `albumartist`.
+> Leave it empty on a compilation and the album shatters into one entry per track
+> artist. Set `artist` per track and `albumartist` once for the whole album —
+> `--tag "albumartist=Various Artists"` is the usual fix.
+
+Stored as `TPE2` in ID3, `albumartist` in FLAC and Ogg Vorbis, and `aART` in MP4.
+
+If a tag key has no slot in the target format — or the file is a format this tool
+cannot write — the write is reported and `write_tags` returns false, rather than
+appearing to succeed while changing nothing.

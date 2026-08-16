@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 try:
-    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPOS, ID3NoHeaderError
+    from mutagen.id3 import ID3, TIT2, TPE1, TPE2, TALB, TDRC, TRCK, TCON, TPOS, ID3NoHeaderError
     from mutagen.flac import FLAC
     from mutagen.mp4 import MP4
     from mutagen.oggvorbis import OggVorbis
@@ -91,8 +91,16 @@ def _id3_text(audio, frame_id: str, numeric: bool = False) -> str:
 
 
 def read_tags(file_path: Path) -> dict:
-    """Return a dict with keys: title, artist, album, year, track, disc, genre."""
-    tags = {k: "" for k in ("title", "artist", "album", "year", "track", "disc", "genre")}
+    """
+    Return a dict with keys: title, artist, albumartist, album, year, track,
+    disc, genre.
+
+    albumartist is what a library manager groups an album by. Without it a
+    compilation scatters into one album per track artist, so it is read and
+    written alongside the rest rather than being treated as optional.
+    """
+    tags = {k: "" for k in ("title", "artist", "albumartist", "album",
+                            "year", "track", "disc", "genre")}
     suffix = file_path.suffix.lower()
 
     try:
@@ -103,6 +111,7 @@ def read_tags(file_path: Path) -> dict:
                 return tags
             tags["title"]  = _id3_text(audio, "TIT2")
             tags["artist"] = _id3_text(audio, "TPE1")
+            tags["albumartist"] = _id3_text(audio, "TPE2")
             tags["album"]  = _id3_text(audio, "TALB")
             tags["year"]   = _id3_text(audio, "TDRC")
             tags["track"]  = _id3_text(audio, "TRCK", numeric=True)
@@ -113,6 +122,7 @@ def read_tags(file_path: Path) -> dict:
             audio = FLAC(file_path)
             tags["title"]  = _clean(audio.get("title",       [""])[0])
             tags["artist"] = _clean(audio.get("artist",      [""])[0])
+            tags["albumartist"] = _clean(audio.get("albumartist", [""])[0])
             tags["album"]  = _clean(audio.get("album",       [""])[0])
             tags["year"]   = _clean(audio.get("date",               [""])[0])
             tags["track"]  = _clean_number(audio.get("tracknumber", [""])[0])
@@ -123,6 +133,7 @@ def read_tags(file_path: Path) -> dict:
             audio = MP4(file_path)
             tags["title"]  = _clean(audio.get("\xa9nam", [""])[0])
             tags["artist"] = _clean(audio.get("\xa9ART", [""])[0])
+            tags["albumartist"] = _clean(audio.get("aART", [""])[0])
             tags["album"]  = _clean(audio.get("\xa9alb", [""])[0])
             tags["year"]   = _clean(audio.get("\xa9day", [""])[0])
             tags["genre"]  = _clean(audio.get("\xa9gen", [""])[0])
@@ -135,6 +146,7 @@ def read_tags(file_path: Path) -> dict:
             audio = OggVorbis(file_path)
             tags["title"]  = _clean(audio.get("title",       [""])[0])
             tags["artist"] = _clean(audio.get("artist",      [""])[0])
+            tags["albumartist"] = _clean(audio.get("albumartist", [""])[0])
             tags["album"]  = _clean(audio.get("album",       [""])[0])
             tags["year"]   = _clean(audio.get("date",               [""])[0])
             tags["track"]  = _clean_number(audio.get("tracknumber", [""])[0])
@@ -152,6 +164,11 @@ def read_tags(file_path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
+    """
+    Write the given tag fields. Unknown keys, and any key this format has no
+    slot for, are reported rather than dropped in silence - a write that
+    quietly does nothing is worse than one that fails loudly.
+    """
     suffix = file_path.suffix.lower()
 
     if dry_run:
@@ -159,6 +176,7 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
             print(f"  [dry-run] tag {key} = {value!r}")
         return True
 
+    handled = set()
     try:
         if suffix == ".mp3":
             try:
@@ -166,55 +184,71 @@ def write_tags(file_path: Path, updates: dict, dry_run: bool) -> bool:
             except ID3NoHeaderError:
                 audio = ID3()
             frame_map = {
-                "title":  TIT2, "artist": TPE1, "album": TALB,
+                "title":  TIT2, "artist": TPE1, "albumartist": TPE2, "album": TALB,
                 "year":   TDRC, "track":  TRCK, "disc":  TPOS, "genre": TCON,
             }
             for key, value in updates.items():
                 if key in frame_map:
                     cls = frame_map[key]
                     audio[cls.__name__] = cls(encoding=3, text=value)
+                    handled.add(key)
             audio.save(file_path)
 
         elif suffix == ".flac":
             audio = FLAC(file_path)
             key_map = {
-                "title": "title", "artist": "artist", "album": "album",
-                "year": "date", "track": "tracknumber", "disc": "discnumber", "genre": "genre",
+                "title": "title", "artist": "artist", "albumartist": "albumartist",
+                "album": "album", "year": "date", "track": "tracknumber",
+                "disc": "discnumber", "genre": "genre",
             }
             for key, value in updates.items():
                 if key in key_map:
                     audio[key_map[key]] = value
+                    handled.add(key)
             audio.save()
 
         elif suffix in (".m4a", ".mp4"):
             audio = MP4(file_path)
             key_map = {
-                "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb",
-                "year": "\xa9day", "genre": "\xa9gen",
+                "title": "\xa9nam", "artist": "\xa9ART", "albumartist": "aART",
+                "album": "\xa9alb", "year": "\xa9day", "genre": "\xa9gen",
             }
             for key, value in updates.items():
                 if key == "disc":
                     try:
                         audio["disk"] = [(int(value), 0)]
+                        handled.add(key)
                     except ValueError:
                         print(f"  Warning: disc value '{value}' is not a number — skipping")
                 elif key in key_map:
                     audio[key_map[key]] = [value]
+                    handled.add(key)
             audio.save()
 
         elif suffix == ".ogg":
             audio = OggVorbis(file_path)
             key_map = {
-                "title": "title", "artist": "artist", "album": "album",
-                "year": "date", "track": "tracknumber", "disc": "discnumber", "genre": "genre",
+                "title": "title", "artist": "artist", "albumartist": "albumartist",
+                "album": "album", "year": "date", "track": "tracknumber",
+                "disc": "discnumber", "genre": "genre",
             }
             for key, value in updates.items():
                 if key in key_map:
                     audio[key_map[key]] = value
+                    handled.add(key)
             audio.save()
+
+        else:
+            print(f"  Warning: '{suffix}' is not a writable format — "
+                  f"{len(updates)} tag(s) not written to '{file_path.name}'")
+            return False
 
         for key, value in updates.items():
             print(f"  tag {key} = {value!r}")
+        missed = set(updates) - handled
+        if missed:
+            print(f"  Warning: {sorted(missed)} not supported for '{suffix}' — not written")
+            return False
         return True
 
     except Exception as exc:
@@ -265,7 +299,7 @@ def apply_transforms(title: str, args: argparse.Namespace) -> str:
 # File renaming
 # ---------------------------------------------------------------------------
 
-PATTERN_KEYS = ("title", "artist", "album", "year", "track", "disc", "genre")
+PATTERN_KEYS = ("title", "artist", "albumartist", "album", "year", "track", "disc", "genre")
 
 # A placeholder is {key} with an optional zero-pad width, e.g. {track:02}.
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)(?::(\d+))?\}")
@@ -452,7 +486,7 @@ def process_file(file_path: Path, args: argparse.Namespace) -> None:
                 continue
             key, _, value = pair.partition("=")
             key = key.lower().strip()
-            if key not in ("title", "artist", "album", "year", "track", "disc", "genre"):
+            if key not in PATTERN_KEYS:
                 print(f"  Warning: unknown tag key '{key}' — skipping")
                 continue
             updates[key] = value.strip()
@@ -619,7 +653,7 @@ Examples:
 
     parser.add_argument("--tag", "-t", action="append", metavar="KEY=VALUE",
                         help=("Set a tag. Repeatable. "
-                              "Keys: title, artist, album, year, track, disc, genre. "
+                              "Keys: title, artist, albumartist, album, year, track, disc, genre. "
                               "Example: --tag \"artist=Daft Punk\""))
 
     parser.add_argument("--strip-start", type=int, metavar="N",
